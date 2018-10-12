@@ -8,6 +8,7 @@ import datetime
 import shutil
 import xonsh.lazyasd as lazyasd
 import xonsh.built_ins as built_ins
+from xonsh import __version__
 
 __all__ = ()
 
@@ -38,11 +39,11 @@ class ZHandler:
 
     def parser():
         from argparse import ArgumentParser
-        parser = ArgumentParser(prog='z', description=__doc__)
+        parser = ArgumentParser(prog='avox', description=__doc__)
 
         parser.add_argument('patterns', metavar='REGEX', nargs='+',
                             help='Names to match')
-
+   
         parser.add_argument('-c', default=False,
                             action='store_true', dest='subdir_only',
                             help='restrict matches to subdirectories of the current directory')
@@ -74,10 +75,11 @@ class ZHandler:
     parser = lazyasd.LazyObject(parser, locals(), 'parser')
 
     def __init__(self):
-        self.Z_DATA = __xonsh_env__.get('_Z_DATA', os.path.expanduser('~/.z'))
-        self.Z_OWNER = __xonsh_env__.get('_Z_OWNER')
-        self.Z_NO_RESOLVE_SYMLINKS = __xonsh_env__.get('_Z_NO_RESOLVE_SYMLINKS', False)
-        self.Z_EXCLUDE_DIRS = __xonsh_env__.get('_Z_EXCLUDE_DIRS', [])
+        xonsh_env = __xonsh_env__ if int(__version__.split('.')[0])>=8 else __xonsh__.env
+        self.Z_DATA = xonsh_env.get('_Z_DATA', os.path.expanduser('~/.z'))
+        self.Z_OWNER = xonsh_env.get('_Z_OWNER')
+        self.Z_NO_RESOLVE_SYMLINKS = xonsh_env.get('_Z_NO_RESOLVE_SYMLINKS', False)
+        self.Z_EXCLUDE_DIRS = xonsh_env.get('_Z_EXCLUDE_DIRS', [])
 
     # XXX: Is there a way to make this more transactional?
     def load_data(self):
@@ -102,11 +104,8 @@ class ZHandler:
                 data[i] = ZEntry(e.path, int(e.rank * self.GROOM_LEVEL), e.time)
 
         # Use a temporary file to minimize time the file is open and minimize clobbering
-        # Use delete=False so the file can be closed without removing it. On Windows
-        # you can not copy an open file.
         from tempfile import NamedTemporaryFile
-        with NamedTemporaryFile('wt', encoding=sys.getfilesystemencoding(),
-                                delete=False) as f:
+        with NamedTemporaryFile('wt', encoding=sys.getfilesystemencoding()) as f:
             for e in data:
                 f.write("{}|{}|{}\n".format(e.path, int(e.rank), int(e.time.timestamp())))
             f.flush()
@@ -114,13 +113,12 @@ class ZHandler:
             if self.Z_OWNER:
                 shutil.chown(f.name, user=self.Z_OWNER)
 
-        # On POSIX, rename() is atomic and will clobber
-        # On Windows, neither of these is true, so remove first.
-        from xonsh.platform import ON_WINDOWS
-        if ON_WINDOWS and os.path.exists(self.Z_DATA):
-            os.remove(self.Z_DATA)
-        shutil.copy(f.name, self.Z_DATA)
-        os.remove(f.name)
+            # On POSIX, rename() is atomic and will clobber
+            # On Windows, neither of these is true, so remove first.
+            from xonsh.platform import ON_WINDOWS
+            if ON_WINDOWS and os.path.exists(self.Z_DATA):
+                os.remove(self.Z_DATA)
+            shutil.copy(f.name, self.Z_DATA)
 
     def _doesitmatch(self, patterns, entry):
         """
@@ -146,7 +144,7 @@ class ZHandler:
         elif args.action == 'remove':
             self.remove(self.pwd())
             return
-
+        
         data = list(self.load_data())
         if args.subdir_only:
             pwd = self.getpwd()
@@ -170,7 +168,7 @@ class ZHandler:
             return "", "No matches found\n", 1
 
         if args.action == 'cd':
-            built_ins.builtins.aliases['cd']([data[0].path])
+            built_ins.run_subproc([['cd', data[0].path]])
         elif args.action == 'echo':
             return data[0].path + '\n'
         elif args.action == 'list':
